@@ -4,6 +4,7 @@
 package plainify
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -129,7 +130,7 @@ func ScanFile(absPath, relPath string, cfg Config) ([]Finding, error) {
 	// committing to loading the entire file into memory.
 	header := make([]byte, 8192)
 	n, err := f.Read(header)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("read %s: %w", relPath, err)
 	}
 	header = header[:n]
@@ -148,14 +149,14 @@ func ScanFile(absPath, relPath string, cfg Config) ([]Finding, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", relPath, err)
 	}
-	buf := append(header, rest...)
+	header = append(header, rest...)
 
 	// Strip or fix UTF-8 BOM.
-	hasBOM := len(buf) >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF
+	hasBOM := len(header) >= 3 && header[0] == 0xEF && header[1] == 0xBB && header[2] == 0xBF
 	if hasBOM && cfg.AllowUtf8Bom {
-		buf = buf[3:]
+		header = header[3:]
 	}
-	return scanText(absPath, relPath, ext, string(buf), hasBOM, fi.Mode(), cfg)
+	return scanText(absPath, relPath, ext, string(header), hasBOM, fi.Mode(), cfg)
 }
 
 // detectUTF16 identifies UTF-16 encoded files (BOM or heuristic).
