@@ -47,3 +47,6 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+      - name: Pedant
+        uses: goeselt/pedant@94db68b1e19b3e49f2d2ccd5b094c3ccbc7d4246 # v1.0.0

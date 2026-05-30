@@ -100,7 +100,7 @@ func TestIntegration_CLINofix(t *testing.T) {
 	// Build the binary.
 	bin := filepath.Join(t.TempDir(), "plainify")
 	buildCmd := exec.Command("go", "build", "-o", bin, ".")
-	buildCmd.Dir = filepath.Join(testProjectRoot(t))
+	buildCmd.Dir = testProjectRoot(t)
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}

@@ -26,12 +26,12 @@ Requires Go 1.24 or later. No external dependencies.
 
 ## What It Fixes
 
-- **CRLF line endings** (`\r\n`) -- converted to LF; mixed line endings (both CRLF and LF in the same file) are
-  detected specifically
+- **CRLF line endings** (`\r\n`) -- converted to LF; mixed line endings (both CRLF and LF in the same file) are detected
+  specifically
 - **Typographic characters** that sneak in via AI-generated text or word-processor paste -- em dash (`\u2014`), en dash
   (`\u2013`), smart quotes (`\u2018` `\u2019` `\u201C` `\u201D`), arrows (`\u2192` `\u2190` `\u21D2`), non-breaking
-  space (`\u00A0`), ellipsis (`\u2026`), bullet (`\u2022`), box-drawing characters (`\u2514` `\u251C` `\u2500`
-  `\u2502`) -- each replaced with its ASCII equivalent
+  space (`\u00A0`), ellipsis (`\u2026`), bullet (`\u2022`), box-drawing characters (`\u2514` `\u251C` `\u2500` `\u2502`)
+  -- each replaced with its ASCII equivalent
 - **Invisible characters** -- zero-width space (`\u200B`), zero-width non-joiner (`\u200C`), zero-width joiner
   (`\u200D`), soft hyphen (`\u00AD`) -- deleted; these are invisible in editors but silently break string comparisons
   and regular expression matches
