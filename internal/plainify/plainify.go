@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 )
 
 // skipExts lists file extensions that are always treated as binary and skipped.
@@ -151,12 +152,34 @@ func ScanFile(absPath, relPath string, cfg Config) ([]Finding, error) {
 	}
 	header = append(header, rest...)
 
-	// Strip or fix UTF-8 BOM.
 	hasBOM := len(header) >= 3 && header[0] == 0xEF && header[1] == 0xBB && header[2] == 0xBF
-	if hasBOM && cfg.AllowUtf8Bom {
-		header = header[3:]
+	if finding := findInvalidUTF8(relPath, header); finding != nil {
+		return []Finding{*finding}, nil
 	}
 	return scanText(absPath, relPath, ext, string(header), hasBOM, fi.Mode(), cfg)
+}
+
+func findInvalidUTF8(relPath string, buf []byte) *Finding {
+	line, col := 1, 1
+	for len(buf) > 0 {
+		r, size := utf8.DecodeRune(buf)
+		if r == utf8.RuneError && size == 1 {
+			return &Finding{
+				File:    relPath,
+				Line:    line,
+				Col:     col,
+				Message: fmt.Sprintf("invalid UTF-8 byte 0x%02X - convert to UTF-8", buf[0]),
+			}
+		}
+		if r == '\n' {
+			line++
+			col = 1
+		} else {
+			col++
+		}
+		buf = buf[size:]
+	}
+	return nil
 }
 
 // detectUTF16 identifies UTF-16 encoded files (BOM or heuristic).
@@ -228,22 +251,30 @@ func scanText(absPath, relPath, ext, content string, hasBOM bool, perm os.FileMo
 			}
 			content = fixed
 		}
-		return findNonASCII(relPath, content), nil
+		return findNonASCII(relPath, contentForFindings(content, hasBOM, cfg)), nil
 	}
 
+	checkContent := contentForFindings(content, hasBOM, cfg)
 	var findings []Finding
 	if hasBOM && !cfg.AllowUtf8Bom {
 		findings = append(findings, Finding{File: relPath, Line: 1, Col: 1, Message: "UTF-8 BOM (EF BB BF) - remove for portability"})
 	}
-	findings = append(findings, findCRLF(relPath, content)...)
-	findings = append(findings, findReplacements(relPath, content)...)
-	findings = append(findings, findInvisibles(relPath, content)...)
-	findings = append(findings, findStrayControls(relPath, content)...)
+	findings = append(findings, findCRLF(relPath, checkContent)...)
+	findings = append(findings, findReplacements(relPath, checkContent)...)
+	findings = append(findings, findInvisibles(relPath, checkContent)...)
+	findings = append(findings, findStrayControls(relPath, checkContent)...)
 	if ext == ".md" {
-		findings = append(findings, FindEmojiFindings(relPath, content)...)
+		findings = append(findings, FindEmojiFindings(relPath, checkContent)...)
 	}
-	findings = append(findings, findNonASCII(relPath, content)...)
+	findings = append(findings, findNonASCII(relPath, checkContent)...)
 	return findings, nil
+}
+
+func contentForFindings(content string, hasBOM bool, cfg Config) string {
+	if hasBOM && cfg.AllowUtf8Bom {
+		return strings.TrimPrefix(content, "\xEF\xBB\xBF")
+	}
+	return content
 }
 
 func findCRLF(relPath, content string) []Finding {

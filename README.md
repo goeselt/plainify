@@ -22,7 +22,7 @@ cd plainify
 go build -o plainify .
 ```
 
-Requires Go 1.24 or later. No external dependencies.
+Requires Go 1.26.4 or later. No external dependencies.
 
 ## What It Fixes
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -162,6 +163,40 @@ func TestIntegration_CLIFix(t *testing.T) {
 	got, _ := os.ReadFile(filepath.Join(dir, "doc.txt"))
 	if string(got) != "He said \"hello\".\n" {
 		t.Errorf("file not fixed: %q", got)
+	}
+}
+
+func TestIntegration_CLIScanErrorExitsRuntimeError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	bin := filepath.Join(t.TempDir(), "plainify")
+	buildCmd := exec.Command("go", "build", "-o", bin, ".")
+	buildCmd.Dir = testProjectRoot(t)
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+
+	missing := filepath.Join(dir, "missing.txt")
+	cmd := exec.Command(bin, "-q", "--workspace", dir, missing)
+	stdout, err := cmd.Output()
+	if err == nil {
+		t.Fatal("expected non-zero exit for scan error")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T: %v", err, err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Fatalf("exit code = %d, want 2", exitErr.ExitCode())
+	}
+
+	var result output
+	if err := json.Unmarshal(stdout, &result); err != nil {
+		t.Fatalf("unmarshal: %v\nstdout: %s", err, stdout)
+	}
+	if result.Status != "error" {
+		t.Errorf("status = %q, want error", result.Status)
 	}
 }
 

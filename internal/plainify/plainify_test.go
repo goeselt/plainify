@@ -317,6 +317,46 @@ func TestScanFile_UTF8BOMAllowed(t *testing.T) {
 	}
 }
 
+func TestScanFile_UTF8BOMAllowedPreservedWhenFixingOtherIssue(t *testing.T) {
+	t.Parallel()
+	path := writeFile(t, "file.txt", "\xEF\xBB\xBFline1\r\nline2\r\n")
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: true, AllowUtf8Bom: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings with AllowUtf8Bom, got: %v", findings)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "\xEF\xBB\xBFline1\nline2\n" {
+		t.Errorf("BOM should be preserved while fixing CRLF: %q", got)
+	}
+}
+
+func TestScanFile_InvalidUTF8NotRewrittenInFixMode(t *testing.T) {
+	t.Parallel()
+	original := []byte{'o', 'k', 0xFF, '\r', '\n'}
+	path := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one invalid UTF-8 finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "invalid UTF-8 byte 0xFF - convert to UTF-8" {
+		t.Errorf("unexpected finding: %+v", findings[0])
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != string(original) {
+		t.Errorf("invalid UTF-8 file should not be rewritten: got %v, want %v", got, original)
+	}
+}
+
 func TestScanFile_StrayControlDetect(t *testing.T) {
 	t.Parallel()
 	// Form feed (0x0C) in the middle of a file.

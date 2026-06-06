@@ -80,6 +80,7 @@ func main() {
 	}
 
 	var allFindings []plainify.Finding
+	hadScanError := false
 	for _, f := range files {
 		absPath := f
 		if !filepath.IsAbs(f) {
@@ -94,20 +95,26 @@ func main() {
 		findings, err := plainify.ScanFile(absPath, relPath, cfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[plainify] warning: %v\n", err)
+			hadScanError = true
 			continue
 		}
 		allFindings = append(allFindings, findings...)
 	}
 
 	status := "pass"
-	if len(allFindings) > 0 {
+	if hadScanError {
+		status = "error"
+	} else if len(allFindings) > 0 {
 		status = "fail"
 	}
 
 	if !*quiet {
-		if status == "pass" {
+		switch status {
+		case "error":
+			fmt.Fprintln(os.Stderr, "[plainify] error: one or more files could not be scanned")
+		case "pass":
 			fmt.Fprintln(os.Stderr, "[plainify] pass")
-		} else {
+		default:
 			fmt.Fprintf(os.Stderr, "[plainify] %d finding(s)\n", len(allFindings))
 			for _, f := range allFindings {
 				printFinding(f)
@@ -127,6 +134,9 @@ func main() {
 		fatal("encode output: %v", err)
 	}
 
+	if hadScanError {
+		os.Exit(2)
+	}
 	if len(allFindings) > 0 {
 		os.Exit(1)
 	}
