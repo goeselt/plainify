@@ -17,27 +17,15 @@
 Go 1.24 or later. No external dependencies.
 
 ```bash
-go build ./...
+make build
 ```
 
 ## Local Verification
 
-Format:
+Run the same checks used by CI:
 
 ```bash
-gofmt -l .
-```
-
-Vet:
-
-```bash
-go vet ./...
-```
-
-Test:
-
-```bash
-go test -race ./...
+make check
 ```
 
 Lint:
