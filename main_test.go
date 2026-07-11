@@ -24,7 +24,7 @@ func TestDiscoverFiles(t *testing.T) {
 	// Add an untracked (non-ignored) file.
 	writeTestFile(t, filepath.Join(dir, "untracked.txt"), "world\n")
 
-	files, err := discoverFiles(dir)
+	files, err := discoverFiles(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("discoverFiles: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestDiscoverFiles_SkipsDeletedTracked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	files, err := discoverFiles(dir)
+	files, err := discoverFiles(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("discoverFiles: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestDiscoverFiles_KeepsBrokenSymlink(t *testing.T) {
 	run(t, dir, "git", "add", "broken")
 	run(t, dir, "git", "commit", "-m", "init")
 
-	files, err := discoverFiles(dir)
+	files, err := discoverFiles(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("discoverFiles: %v", err)
 	}
@@ -152,14 +152,14 @@ func TestIntegration_CLINofix(t *testing.T) {
 
 	// Build the binary.
 	bin := filepath.Join(t.TempDir(), "plainify")
-	buildCmd := exec.Command("go", "build", "-o", bin, ".")
+	buildCmd := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".")
 	buildCmd.Dir = testProjectRoot(t)
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 
 	// Run in nofix mode.
-	cmd := exec.Command(bin, "--nofix", "-q", dir)
+	cmd := exec.CommandContext(t.Context(), bin, "--nofix", "-q", dir)
 	stdout, err := cmd.Output()
 	if err == nil {
 		t.Fatal("expected non-zero exit for findings")
@@ -191,14 +191,14 @@ func TestIntegration_CLIFix(t *testing.T) {
 
 	// Build the binary.
 	bin := filepath.Join(t.TempDir(), "plainify")
-	buildCmd := exec.Command("go", "build", "-o", bin, ".")
+	buildCmd := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".")
 	buildCmd.Dir = testProjectRoot(t)
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 
 	// Run in fix mode (default).
-	cmd := exec.Command(bin, "-q", dir)
+	cmd := exec.CommandContext(t.Context(), bin, "-q", dir)
 	stdout, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("expected exit 0 after fix, got: %v\nstdout: %s", err, stdout)
@@ -223,14 +223,14 @@ func TestIntegration_CLIScanErrorExitsRuntimeError(t *testing.T) {
 	dir := t.TempDir()
 
 	bin := filepath.Join(t.TempDir(), "plainify")
-	buildCmd := exec.Command("go", "build", "-o", bin, ".")
+	buildCmd := exec.CommandContext(t.Context(), "go", "build", "-o", bin, ".")
 	buildCmd.Dir = testProjectRoot(t)
 	if out, err := buildCmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
 
 	missing := filepath.Join(dir, "missing.txt")
-	cmd := exec.Command(bin, "-q", "--workspace", dir, missing)
+	cmd := exec.CommandContext(t.Context(), bin, "-q", "--workspace", dir, missing)
 	stdout, err := cmd.Output()
 	if err == nil {
 		t.Fatal("expected non-zero exit for scan error")
@@ -266,7 +266,7 @@ func writeTestFile(t *testing.T, path, content string) {
 
 func run(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()
-	cmd := exec.Command(name, args...)
+	cmd := exec.CommandContext(t.Context(), name, args...)
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, out)

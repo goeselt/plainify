@@ -12,6 +12,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -64,7 +65,7 @@ func main() {
 	}
 
 	if len(files) == 0 {
-		files, err = discoverFiles(absWS)
+		files, err = discoverFiles(context.Background(), absWS)
 		if err != nil {
 			fatal("file discovery: %v", err)
 		}
@@ -171,8 +172,8 @@ func resolveWorkspaceAndFiles(wsFlag string, args []string) (ws string, files []
 }
 
 // discoverFiles runs git ls-files to find tracked and untracked (non-ignored) files.
-func discoverFiles(workspace string) ([]string, error) {
-	cmd := exec.Command("git", "ls-files", "--cached", "--others", "--exclude-standard")
+func discoverFiles(ctx context.Context, workspace string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "--cached", "--others", "--exclude-standard")
 	cmd.Dir = workspace
 	out, err := cmd.Output()
 	if err != nil {

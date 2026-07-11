@@ -6,8 +6,8 @@ characters you cannot see in an editor.
 Text files accumulate cruft that looks fine but is not: smart quotes and em-dashes from AI output or word-processor
 paste, `\r\n` from cross-platform edits, zero-width and bidirectional characters that are invisible on screen but change
 what compilers and regexes see, emoji in source files, and mojibake from a bad re-encoding. `plainify` rewrites what it
-can safely fix in place and reports the rest, so diffs stay clean and "why does this regex not match?" mysteries go
-away.
+can safely fix in place and reports the rest, so diffs stay clean and "why does this regular expression not match?"
+mysteries go away.
 
 - **Fixes in place, or previews.** A plain run rewrites every fixable issue; `--nofix` reports without touching a byte.
 - **Catches invisible attacks.** Bidirectional controls (the [Trojan Source](https://trojansource.codes) vector,
@@ -17,8 +17,8 @@ away.
 - **Machine- and human-readable.** Human-readable progress on stderr, structured JSON on stdout for CI gating.
 - **Zero config, git-aware.** Discovers files through `git ls-files` -- no config file, no external dependencies.
 
-Reach for `plainify` when a diff shows changes you cannot see, a regex mysteriously fails to match, or you want CI to
-reject non-portable text before it lands.
+Reach for `plainify` when a diff shows changes you cannot see, a regular expression mysteriously fails to match, or you
+want CI to reject non-portable text before it lands.
 
 > [!NOTE]
 >
@@ -94,7 +94,7 @@ to check only those files.
 | `--nofix`, `-n`    | Report issues without modifying files                        |
 | `--workspace path` | Repository root for `git ls-files` and relative path display |
 | `--exclude regex`  | Skip files matching the regular expression (repeatable)      |
-| `--allow-utf8-bom` | Do not flag or remove a UTF-8 BOM                             |
+| `--allow-utf8-bom` | Do not flag or remove a UTF-8 BOM                            |
 | `-q`               | Suppress human-readable progress; only emit JSON             |
 | `--version`        | Print version and exit                                       |
 

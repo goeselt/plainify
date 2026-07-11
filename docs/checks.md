@@ -13,20 +13,20 @@ CRLF (`\r\n`) is converted to LF. A file mixing CRLF and bare LF is reported as 
 
 Replaced with their ASCII equivalents. These frequently arrive via AI-generated text or word-processor paste.
 
-| Category                                      | Code points                                   | ASCII                |
-| --------------------------------------------- | --------------------------------------------- | -------------------- |
-| Em / en dash, Unicode hyphens, horizontal bar | U+2014, U+2013, U+2010-U+2012, U+2015         | `--` / `-`           |
-| Minus sign                                    | U+2212                                        | `-`                  |
-| Single quotes, low quotes, single guillemets  | U+2018, U+2019, U+201A, U+201B, U+2039, U+203A | `'`                  |
-| Double quotes, low quotes, guillemets         | U+201C-U+201F, U+00AB, U+00BB                 | `"`                  |
-| Prime, double prime                           | U+2032, U+2033                                | `'`, `"`             |
-| Arrows                                        | U+2192, U+2190, U+21D2                         | `-->`, `<--`, `=>`   |
-| Ellipsis                                      | U+2026                                        | `...`                |
-| Bullet                                        | U+2022                                        | `-`                  |
-| Box drawing                                   | U+2514, U+251C, U+2500, U+2502                | `+`, `+`, `-`, `\|`  |
-| Unicode spaces                                | U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000  | space                |
-| Line / paragraph separators                   | U+2028, U+2029                                | newline              |
-| Fullwidth ASCII                               | U+FF01-U+FF5E                                  | ASCII 0x21-0x7E      |
+| Category                                      | Code points                                    | ASCII               |
+| --------------------------------------------- | ---------------------------------------------- | ------------------- |
+| Em / en dash, Unicode hyphens, horizontal bar | U+2014, U+2013, U+2010-U+2012, U+2015          | `--` / `-`          |
+| Minus sign                                    | U+2212                                         | `-`                 |
+| Single quotes, low quotes, single guillemets  | U+2018, U+2019, U+201A, U+201B, U+2039, U+203A | `'`                 |
+| Double quotes, low quotes, guillemets         | U+201C-U+201F, U+00AB, U+00BB                  | `"`                 |
+| Prime, double prime                           | U+2032, U+2033                                 | `'`, `"`            |
+| Arrows                                        | U+2192, U+2190, U+21D2                         | `-->`, `<--`, `=>`  |
+| Ellipsis                                      | U+2026                                         | `...`               |
+| Bullet                                        | U+2022                                         | `-`                 |
+| Box drawing                                   | U+2514, U+251C, U+2500, U+2502                 | `+`, `+`, `-`, `\|` |
+| Unicode spaces                                | U+00A0, U+2000-U+200A, U+202F, U+205F, U+3000  | space               |
+| Line / paragraph separators                   | U+2028, U+2029                                 | newline             |
+| Fullwidth ASCII                               | U+FF01-U+FF5E                                  | ASCII 0x21-0x7E     |
 
 ### Invisible Characters
 

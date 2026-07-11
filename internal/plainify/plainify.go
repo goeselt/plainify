@@ -485,8 +485,7 @@ func scanText(absPath, relPath, ext, content string, hasBOM bool, perm os.FileMo
 			}
 		}
 		checkContent := strings.TrimPrefix(fixed, utf8BOM)
-		var findings []Finding
-		findings = append(findings, findConflictMarkers(relPath, checkContent)...)
+		findings := findConflictMarkers(relPath, checkContent)
 		findings = append(findings, findNonASCII(relPath, checkContent, allowEmoji)...)
 		return findings, nil
 	}
