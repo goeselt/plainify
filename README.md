@@ -1,73 +1,84 @@
 # plainify
 
-A command-line tool that detects and fixes common text encoding problems in a repository: CRLF line endings, non-ASCII
-typographic characters, invisible characters, bidirectional control characters, and stray control characters. Emoji are
-allowed in Markdown-like files and reported everywhere else.
+A command-line tool that normalizes repository text to plain, portable ASCII -- and flags the dangerous invisible
+characters you cannot see in an editor.
 
-It discovers files automatically via `git ls-files` and works equally well as a local tool and in CI pipelines. Output
-is human-readable on stderr and machine-readable JSON on stdout.
+Text files accumulate cruft that looks fine but is not: smart quotes and em-dashes from AI output or word-processor
+paste, `\r\n` from cross-platform edits, zero-width and bidirectional characters that are invisible on screen but change
+what compilers and regexes see, emoji in source files, and mojibake from a bad re-encoding. `plainify` rewrites what it
+can safely fix in place and reports the rest, so diffs stay clean and "why does this regex not match?" mysteries go
+away.
 
-## Installation
+- **Fixes in place, or previews.** A plain run rewrites every fixable issue; `--nofix` reports without touching a byte.
+- **Catches invisible attacks.** Bidirectional controls (the [Trojan Source](https://trojansource.codes) vector,
+  CVE-2021-42574), zero-width characters, and Unicode tag characters -- invisible in editors, dangerous in code and in
+  agent instruction files.
+- **Knows where emoji belong.** Left intact in Markdown and agent-instruction files, flagged in source code.
+- **Machine- and human-readable.** Human-readable progress on stderr, structured JSON on stdout for CI gating.
+- **Zero config, git-aware.** Discovers files through `git ls-files` -- no config file, no external dependencies.
 
-### Download a Release Binary
+Reach for `plainify` when a diff shows changes you cannot see, a regex mysteriously fails to match, or you want CI to
+reject non-portable text before it lands.
+
+> [!NOTE]
+>
+> A plain run rewrites fixable issues **in place**. Run with `--nofix` first to preview, or let version control be your
+> safety net.
+
+## Getting Started
+
+### Install
 
 Grab the latest binary for your platform from the [Releases](https://github.com/goeselt/plainify/releases) page and put
-it on your `PATH`.
-
-### Build From Source
+it on your `PATH`, or install with Go (1.24+):
 
 ```bash
-git clone https://github.com/goeselt/plainify.git
-cd plainify
-go build -o plainify .
+go install github.com/goeselt/plainify@latest
 ```
 
-Requires Go 1.24 or later. No external dependencies.
+### Try It
 
-## What It Fixes
+Preview what a repository contains without changing anything:
 
-- **CRLF line endings** (`\r\n`) -- converted to LF; mixed line endings (both CRLF and LF in the same file) are detected
-  specifically
-- **Typographic characters** that sneak in via AI-generated text or word-processor paste -- em/en dash and Unicode
-  hyphens (`\u2014` `\u2013` `\u2010`-`\u2012` `\u2015`), minus sign (`\u2212`), smart quotes, low quotes, and
-  guillemets (`\u2018` `\u2019` `\u201A`-`\u201F` `\u00AB` `\u00BB` `\u2039` `\u203A`), primes (`\u2032`
-  `\u2033`), arrows (`\u2192` `\u2190` `\u21D2`), Unicode spaces (`\u00A0`, `\u2000`-`\u200A`, `\u202F`,
-  `\u205F`, `\u3000`), line/paragraph separators (`\u2028` `\u2029`), fullwidth ASCII variants
-  (`\uFF01`-`\uFF5E`), ellipsis (`\u2026`), bullet (`\u2022`), box-drawing characters (`\u2514` `\u251C`
-  `\u2500` `\u2502`) -- each replaced with its ASCII equivalent
-- **Invisible characters** -- zero-width space (`\u200B`), zero-width non-joiner (`\u200C`), zero-width joiner
-  (`\u200D`), soft hyphen (`\u00AD`), word joiner (`\u2060`), zero-width no-break space (`\uFEFF`), Mongolian
-  vowel separator (`\u180E`), invisible mathematical operators (`\u2061`-`\u2064`), variation selectors
-  (`\uFE00`-`\uFE0D`), and Unicode tag characters (`\uE0000`-`\uE007F`, a known data-smuggling channel) --
-  deleted; these are invisible in editors but silently break string comparisons and regular expression matches
-- **Bidirectional control characters** -- left/right-to-right marks, embedding, override, and isolate characters
-  (`\u200E` `\u200F` `\u202A`-`\u202E` `\u2066`-`\u2069` `\u061C`) -- deleted; these are the basis of the
-  [Trojan Source](https://trojansource.codes) attack (CVE-2021-42574), where code looks different in an editor than what
-  the compiler sees
-- **Stray control characters** -- C0 controls (`0x01`-`0x08`, `0x0B`-`0x0C`, `0x0E`-`0x1F`) including form feed and
-  vertical tab -- deleted; these are almost never intentional in text files and break many tools
-- **Emoji** (never rewritten) -- allowed in Markdown-like files (`.md`, `.markdown`, `.mdx`, `.mdc`, `.adoc`,
-  `.asciidoc`, `.rst`), where they are often intentional content (documentation, agent instruction files); reported as
-  non-ASCII findings in all other files
-- **UTF-8 BOM** -- removed automatically in fix mode (suppress with `--allow-utf8-bom`)
-- **Encoding issues** (reported, not auto-fixed) -- UTF-16 LE/BE with or without BOM, mojibake (double-encoded UTF-8,
-  e.g. `U+00C3 U+00A9` where an e-acute was meant; reported for re-encoding and deliberately never character-fixed),
-  decomposed characters (NFD combining marks, reported with a normalize-to-NFC hint), and arbitrary non-ASCII bytes
-  that remain after all fixable issues are resolved
+```text
+$ plainify --nofix
+[plainify] checking 128 file(s)...
+[plainify] 3 finding(s)
+  docs/guide.md:14:22 non-ASCII typographic character U+2019 - use ASCII equivalent
+  internal/auth.go:1:9 bidirectional control character U+202E (right-to-left override) - remove (Trojan Source risk)
+  notes.txt:5:9 zero-width character U+200B (zero-width space) - remove
+```
 
-### What It Reports (Working-Tree State)
+Drop `--nofix` and `plainify` fixes what it safely can in place, leaving only issues that need a human:
 
-These are reported but never modified -- none of them is a character-level fix:
+```text
+$ plainify
+[plainify] checking 128 file(s)...
+[plainify] pass
+```
 
-- **Merge conflict markers** -- lines beginning with `<<<<<<<`, `|||||||`, `=======`, or `>>>>>>>` left in a file after
-  an unresolved merge; reported only when both an opening and a closing marker are present, so a lone `=======` setext
-  heading is not flagged
-- **Git LFS pointers** -- a file whose working-tree content is still an LFS pointer (`version
-  https://git-lfs.github.com/spec/...`) because the real object was never checked out; run `git lfs pull`
-- **Broken symlinks** -- a symlink whose target does not exist; valid symlinks are skipped and never followed
+## What It Checks
 
-Binary files, common binary extensions (`.png`, `.zip`, `.exe`, ...), and directory entries such as submodule gitlinks
-are silently skipped.
+**Fixed in place** (rewritten unless `--nofix`):
+
+- **Line endings** -- CRLF and mixed CRLF/LF converted to LF.
+- **Typographic characters** -- smart quotes, dashes, guillemets, primes, arrows, Unicode spaces, fullwidth ASCII, and
+  more, each replaced with its ASCII equivalent.
+- **Invisible characters** -- zero-width spaces, word joiners, variation selectors, and Unicode tag characters removed.
+- **Bidirectional controls** -- Trojan Source (CVE-2021-42574) attack vectors removed.
+- **Stray control characters** -- C0 controls (form feed, vertical tab, ...) removed.
+- **UTF-8 BOM** -- removed by default; keep it with `--allow-utf8-bom`.
+
+**Reported, never modified:**
+
+- **Emoji** outside Markdown-like files.
+- **Encoding problems** -- UTF-16, invalid UTF-8, mojibake, and NFD (decomposed) characters.
+- **Merge conflict markers** left in a file after an unresolved merge.
+- **Git LFS pointers** whose object was never checked out.
+- **Broken symlinks** (valid symlinks are skipped and never followed).
+
+See [docs/checks.md](docs/checks.md) for the exact character set and the behavior of every check. Binary files, known
+binary extensions, and submodule gitlinks are silently skipped.
 
 ## Usage
 
@@ -75,84 +86,59 @@ are silently skipped.
 plainify [options] [path...]
 ```
 
-With no paths, `plainify` discovers files automatically using `git ls-files` (tracked and untracked non-ignored files).
-Pass explicit paths to check only those files.
-
-### Options
+With no paths, `plainify` discovers files via `git ls-files` (tracked and untracked, non-ignored). Pass explicit paths
+to check only those files.
 
 | Flag               | Description                                                  |
 | ------------------ | ------------------------------------------------------------ |
 | `--nofix`, `-n`    | Report issues without modifying files                        |
 | `--workspace path` | Repository root for `git ls-files` and relative path display |
 | `--exclude regex`  | Skip files matching the regular expression (repeatable)      |
-| `--allow-utf8-bom` | Do not flag UTF-8 BOM as an issue                            |
+| `--allow-utf8-bom` | Do not flag or remove a UTF-8 BOM                             |
 | `-q`               | Suppress human-readable progress; only emit JSON             |
 | `--version`        | Print version and exit                                       |
-
-### Exit Codes
-
-| Code | Meaning                                            |
-| ---- | -------------------------------------------------- |
-| `0`  | No issues found (or all issues fixed)              |
-| `1`  | Findings remain after the run                      |
-| `2`  | Runtime error (bad arguments, Git not found, etc.) |
-
-## Examples
 
 ```bash
 # Fix everything in the current Git repository (default)
 plainify
 
-# Check only, do not modify files
+# Preview without modifying files
 plainify --nofix
 
-# Check a specific directory
-plainify --nofix path/to/repo
-
-# Check specific files
+# Check specific paths
 plainify --nofix docs/guide.md src/main.go
 
 # Exclude generated and vendored paths
 plainify --exclude "vendor|generated|\.pb\.go$"
-
-# Suppress human-readable output (useful in scripts)
-plainify -q | jq .
 ```
+
+| Exit code | Meaning                                            |
+| --------- | -------------------------------------------------- |
+| `0`       | No issues found (or all issues fixed)              |
+| `1`       | Findings remain after the run                      |
+| `2`       | Runtime error (bad arguments, Git not found, etc.) |
 
 ## Output
 
-Human-readable progress is written to **stderr**:
-
-```text
-[plainify] checking 42 file(s)...
-[plainify] 2 finding(s)
-  docs/guide.md:12:3 non-ASCII typographic character U+2014 - use ASCII equivalent
-  README.md:8:1 CRLF line endings - convert to LF
-```
-
-JSON is written to **stdout** (always, regardless of `-q`):
+Human-readable progress goes to **stderr**; structured JSON always goes to **stdout** (even with `-q`), so it pipes
+cleanly into `jq` or a CI step:
 
 ```json
 {
   "status": "fail",
-  "findings_count": 2,
+  "findings_count": 1,
   "findings": [
     {
       "file": "docs/guide.md",
       "line": 12,
       "col": 3,
       "message": "non-ASCII typographic character U+2014 - use ASCII equivalent"
-    },
-    {
-      "file": "README.md",
-      "line": 8,
-      "message": "CRLF line endings - convert to LF"
     }
   ]
 }
 ```
 
-## Use in CI
+In CI, run in report-only mode to fail the job on any finding:
 
 ```yaml
 - name: Run plainify
