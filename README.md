@@ -55,7 +55,19 @@ Requires Go 1.24 or later. No external dependencies.
   decomposed characters (NFD combining marks, reported with a normalize-to-NFC hint), and arbitrary non-ASCII bytes
   that remain after all fixable issues are resolved
 
-Binary files and common binary extensions (`.png`, `.zip`, `.exe`, ...) are silently skipped.
+### What It Reports (Working-Tree State)
+
+These are reported but never modified -- none of them is a character-level fix:
+
+- **Merge conflict markers** -- lines beginning with `<<<<<<<`, `|||||||`, `=======`, or `>>>>>>>` left in a file after
+  an unresolved merge; reported only when both an opening and a closing marker are present, so a lone `=======` setext
+  heading is not flagged
+- **Git LFS pointers** -- a file whose working-tree content is still an LFS pointer (`version
+  https://git-lfs.github.com/spec/...`) because the real object was never checked out; run `git lfs pull`
+- **Broken symlinks** -- a symlink whose target does not exist; valid symlinks are skipped and never followed
+
+Binary files, common binary extensions (`.png`, `.zip`, `.exe`, ...), and directory entries such as submodule gitlinks
+are silently skipped.
 
 ## Usage
 

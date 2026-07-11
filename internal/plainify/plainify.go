@@ -179,25 +179,37 @@ type Finding struct {
 }
 
 // ScanFile scans a single file for normalization issues.
-// Binary files and files with known binary extensions are silently skipped.
-// In fix mode, fixable issues are rewritten in place; any remaining unfixable
-// issues (e.g., arbitrary non-ASCII bytes) are returned as findings.
+// Symlinks are checked for a valid target but never followed; directories
+// (e.g. submodule gitlinks), binary files, and known binary extensions are
+// silently skipped. In fix mode, fixable issues are rewritten in place; any
+// remaining unfixable issues (e.g., arbitrary non-ASCII bytes) are returned
+// as findings.
 func ScanFile(absPath, relPath string, cfg Config) ([]Finding, error) {
-	ext := strings.ToLower(filepath.Ext(absPath))
-	if skipExts[ext] {
+	// Lstat, not Stat: a symlink must be inspected as the link itself, never
+	// followed. Following would let fix mode rewrite a file outside the
+	// workspace and would rescan targets that git lists in their own right.
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("lstat %s: %w", relPath, err)
+	}
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		return scanSymlink(absPath, relPath)
+	case info.IsDir():
+		// Submodule gitlink or plain directory entry: nothing to scan.
+		return nil, nil
+	case !info.Mode().IsRegular():
+		// Device, socket, FIFO, etc.
 		return nil, nil
 	}
+
+	ext := strings.ToLower(filepath.Ext(absPath))
 
 	f, err := os.Open(absPath)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", relPath, err)
 	}
 	defer func() { _ = f.Close() }()
-
-	fi, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat %s: %w", relPath, err)
-	}
 
 	// Read only the first 8 KB to decide encoding and binary status before
 	// committing to loading the entire file into memory.
@@ -207,6 +219,15 @@ func ScanFile(absPath, relPath string, cfg Config) ([]Finding, error) {
 		return nil, fmt.Errorf("read %s: %w", relPath, err)
 	}
 	header = header[:n]
+
+	// LFS pointer detection precedes the binary-extension skip: pointer files
+	// stand in for binary assets and therefore usually carry binary extensions.
+	if finding := detectLFSPointer(header, relPath); finding != nil {
+		return []Finding{*finding}, nil
+	}
+	if skipExts[ext] {
+		return nil, nil
+	}
 
 	// Encoding detection must precede binary check: UTF-16 files contain null bytes.
 	// UTF-16 is unfixable -- always short-circuit. UTF-8 BOM is fixable in fix mode.
@@ -239,7 +260,50 @@ func ScanFile(absPath, relPath string, cfg Config) ([]Finding, error) {
 	if findings := findMojibake(relPath, string(header)); len(findings) > 0 {
 		return findings, nil
 	}
-	return scanText(absPath, relPath, ext, string(header), hasBOM, fi.Mode(), cfg)
+	return scanText(absPath, relPath, ext, string(header), hasBOM, info.Mode(), cfg)
+}
+
+// lfsPointerPrefix is the fixed opening line of a Git LFS pointer file
+// (https://github.com/git-lfs/git-lfs/blob/main/docs/spec.md). Its presence in
+// the working tree means the real object was never checked out.
+const lfsPointerPrefix = "version https://git-lfs.github.com/spec/"
+
+// detectLFSPointer reports a file whose content is a Git LFS pointer rather
+// than the object it stands for. Not auto-fixable: the object must be fetched.
+func detectLFSPointer(header []byte, relPath string) *Finding {
+	if !bytes.HasPrefix(header, []byte(lfsPointerPrefix)) {
+		return nil
+	}
+	return &Finding{
+		File:    relPath,
+		Line:    1,
+		Col:     1,
+		Message: "Git LFS pointer (object not checked out) - run git lfs pull",
+	}
+}
+
+// scanSymlink reports broken symlinks and skips valid ones. A symlink is never
+// followed: git tracks only the link path, and a valid target that lives in
+// the repository is scanned in its own right.
+func scanSymlink(absPath, relPath string) ([]Finding, error) {
+	target, err := os.Readlink(absPath)
+	if err != nil {
+		return nil, fmt.Errorf("readlink %s: %w", relPath, err)
+	}
+	resolved := target
+	if !filepath.IsAbs(resolved) {
+		resolved = filepath.Join(filepath.Dir(absPath), target)
+	}
+	if _, err := os.Stat(resolved); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []Finding{{
+				File:    relPath,
+				Message: fmt.Sprintf("broken symlink -> %s", target),
+			}}, nil
+		}
+		return nil, fmt.Errorf("stat symlink target %s: %w", relPath, err)
+	}
+	return nil, nil
 }
 
 func findInvalidUTF8(relPath string, buf []byte) *Finding {
@@ -312,6 +376,50 @@ func findMojibake(relPath, content string) []Finding {
 	return findings
 }
 
+// conflictMarkers are the line prefixes git writes for an unresolved merge.
+var conflictMarkers = []string{"<<<<<<<", "|||||||", "=======", ">>>>>>>"}
+
+// isConflictMarker reports whether line is exactly the 7-character marker,
+// optionally followed by a space and a label. This rejects longer runs such as
+// a decorative "========" or a Markdown setext underline "====".
+func isConflictMarker(line, marker string) bool {
+	if !strings.HasPrefix(line, marker) {
+		return false
+	}
+	rest := strings.TrimSuffix(line[len(marker):], "\r")
+	return rest == "" || strings.HasPrefix(rest, " ")
+}
+
+// findConflictMarkers reports unresolved merge conflict markers. To avoid
+// flagging a lone "=======" setext heading, findings are emitted only when the
+// content contains both an opening (<<<<<<<) and a closing (>>>>>>>) marker.
+func findConflictMarkers(relPath, content string) []Finding {
+	lines := strings.Split(content, "\n")
+	hasStart, hasEnd := false, false
+	for _, line := range lines {
+		hasStart = hasStart || isConflictMarker(line, "<<<<<<<")
+		hasEnd = hasEnd || isConflictMarker(line, ">>>>>>>")
+	}
+	if !hasStart || !hasEnd {
+		return nil
+	}
+	var findings []Finding
+	for i, line := range lines {
+		for _, marker := range conflictMarkers {
+			if isConflictMarker(line, marker) {
+				findings = append(findings, Finding{
+					File:    relPath,
+					Line:    i + 1,
+					Col:     1,
+					Message: "merge conflict marker - resolve the conflict",
+				})
+				break
+			}
+		}
+	}
+	return findings
+}
+
 // detectUTF16 identifies UTF-16 encoded files (BOM or heuristic).
 // UTF-16 is not auto-fixable and always produces a finding.
 func detectUTF16(buf []byte, relPath string) *Finding {
@@ -376,7 +484,11 @@ func scanText(absPath, relPath, ext, content string, hasBOM bool, perm os.FileMo
 				return nil, fmt.Errorf("write %s: %w", relPath, err)
 			}
 		}
-		return findNonASCII(relPath, strings.TrimPrefix(fixed, utf8BOM), allowEmoji), nil
+		checkContent := strings.TrimPrefix(fixed, utf8BOM)
+		var findings []Finding
+		findings = append(findings, findConflictMarkers(relPath, checkContent)...)
+		findings = append(findings, findNonASCII(relPath, checkContent, allowEmoji)...)
+		return findings, nil
 	}
 
 	// The BOM is reported via its own finding below; scan the content
@@ -390,6 +502,7 @@ func scanText(absPath, relPath, ext, content string, hasBOM bool, perm os.FileMo
 	findings = append(findings, findReplacements(relPath, checkContent)...)
 	findings = append(findings, findInvisibles(relPath, checkContent, allowEmoji)...)
 	findings = append(findings, findStrayControls(relPath, checkContent)...)
+	findings = append(findings, findConflictMarkers(relPath, checkContent)...)
 	findings = append(findings, findNonASCII(relPath, checkContent, allowEmoji)...)
 	return findings, nil
 }

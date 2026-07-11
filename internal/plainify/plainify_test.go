@@ -787,3 +787,144 @@ func TestScanFile_CombiningMarkNFDHint(t *testing.T) {
 		t.Errorf("message = %q, want %q", findings[0].Message, want)
 	}
 }
+
+func TestScanFile_BrokenSymlink(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(filepath.Join(dir, "nonexistent-target"), link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	findings, err := plainify.ScanFile(link, "link", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one broken-symlink finding, got %d: %v", len(findings), findings)
+	}
+	if !strings.HasPrefix(findings[0].Message, "broken symlink -> ") {
+		t.Errorf("unexpected message: %q", findings[0].Message)
+	}
+}
+
+func TestScanFile_ValidSymlinkNotFollowed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Target contains issues (CRLF); the symlink must not surface them and
+	// must not be rewritten in fix mode.
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("line1\r\nline2\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	findings, err := plainify.ScanFile(link, "link.txt", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected valid symlink to be skipped, got: %v", findings)
+	}
+	// The target must be untouched (fix must not follow the link).
+	got, _ := os.ReadFile(target)
+	if string(got) != "line1\r\nline2\r\n" {
+		t.Errorf("symlink target must not be rewritten: %q", got)
+	}
+}
+
+func TestScanFile_DirectorySkipped(t *testing.T) {
+	t.Parallel()
+	// A submodule gitlink is listed by git ls-files as a directory path.
+	dir := t.TempDir()
+	findings, err := plainify.ScanFile(dir, "mysub", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected directory to be skipped, got: %v", findings)
+	}
+}
+
+func TestScanFile_LFSPointerDetected(t *testing.T) {
+	t.Parallel()
+	// LFS pointer with a binary extension: detection must precede skipExts.
+	pointer := "version https://git-lfs.github.com/spec/v1\n" +
+		"oid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\n" +
+		"size 12345\n"
+	path := writeFile(t, "asset.png", pointer)
+	findings, err := plainify.ScanFile(path, "asset.png", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one LFS finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "Git LFS pointer (object not checked out) - run git lfs pull" {
+		t.Errorf("unexpected message: %q", findings[0].Message)
+	}
+	// Must not be rewritten.
+	got, _ := os.ReadFile(path)
+	if string(got) != pointer {
+		t.Errorf("LFS pointer must not be rewritten: %q", got)
+	}
+}
+
+func TestScanFile_ConflictMarkersDetected(t *testing.T) {
+	t.Parallel()
+	content := "line\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> feature\ntail\n"
+	path := writeFile(t, "file.txt", content)
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 3 {
+		t.Fatalf("expected three conflict-marker findings, got %d: %v", len(findings), findings)
+	}
+	for _, f := range findings {
+		if f.Message != "merge conflict marker - resolve the conflict" {
+			t.Errorf("unexpected message: %q", f.Message)
+		}
+	}
+	if findings[0].Line != 2 || findings[1].Line != 4 || findings[2].Line != 6 {
+		t.Errorf("unexpected lines: %v", findings)
+	}
+}
+
+func TestScanFile_SetextHeadingNotConflict(t *testing.T) {
+	t.Parallel()
+	// A setext H1 underline (=======) with no angle markers is not a conflict.
+	path := writeFile(t, "doc.md", "Title\n=======\n\nbody\n")
+	findings, err := plainify.ScanFile(path, "doc.md", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, f := range findings {
+		if strings.HasPrefix(f.Message, "merge conflict marker") {
+			t.Errorf("false positive conflict marker on setext heading: %v", f)
+		}
+	}
+}
+
+func TestScanFile_DecorativeSeparatorNotConflict(t *testing.T) {
+	t.Parallel()
+	// Longer runs than 7 chars must never be treated as conflict markers,
+	// even alongside real angle markers elsewhere.
+	content := "<<<<<<< HEAD\nx\n========\ny\n>>>>>>> branch\n"
+	path := writeFile(t, "file.txt", content)
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Only the two angle markers count; the 8-char "========" does not.
+	count := 0
+	for _, f := range findings {
+		if strings.HasPrefix(f.Message, "merge conflict marker") {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Errorf("expected 2 conflict markers (8-char separator excluded), got %d: %v", count, findings)
+	}
+}

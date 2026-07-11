@@ -5,8 +5,12 @@
 | File                            | Responsibility                                                                                       |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `main.go`                       | CLI entry point: flag parsing, file discovery via `git ls-files`, JSON output.                       |
-| `internal/plainify/plainify.go` | Core scanner: encoding detection, CRLF, typographic character and invisible character normalisation. |
+| `internal/plainify/plainify.go` | Core scanner: encoding detection, CRLF, typographic/invisible normalisation, working-tree checks.    |
 | `internal/plainify/emoji.go`    | Emoji classification (Unicode ranges) that lets Markdown-like files keep emoji.                      |
+
+Working-tree checks (merge conflict markers, Git LFS pointers, broken symlinks) are report-only: they never modify a
+file. Symlinks are inspected via `os.Lstat` and never followed, so fix mode cannot rewrite a target outside the
+workspace; directory entries (submodule gitlinks) are skipped.
 
 `internal/plainify` has no external dependencies. The only subprocess call is in `main.go` via
 `exec.Command("git", "ls-files", ...)` for automatic file discovery; all file I/O is handled directly by

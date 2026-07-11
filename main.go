@@ -188,7 +188,9 @@ func discoverFiles(workspace string) ([]string, error) {
 		path := filepath.Join(workspace, filepath.FromSlash(line))
 		// git ls-files --cached also lists tracked files that were deleted
 		// from the working tree; skip them instead of failing the scan.
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		// Lstat, not Stat: a broken symlink still exists as a link and must
+		// reach ScanFile to be reported, not be mistaken for a deleted file.
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		files = append(files, path)

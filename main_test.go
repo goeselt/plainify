@@ -62,6 +62,29 @@ func TestDiscoverFiles_SkipsDeletedTracked(t *testing.T) {
 	}
 }
 
+func TestDiscoverFiles_KeepsBrokenSymlink(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	run(t, dir, "git", "init")
+	run(t, dir, "git", "config", "user.email", "test@test.local")
+	run(t, dir, "git", "config", "user.name", "Test")
+	if err := os.Symlink("nonexistent-target", filepath.Join(dir, "broken")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	run(t, dir, "git", "add", "broken")
+	run(t, dir, "git", "commit", "-m", "init")
+
+	files, err := discoverFiles(dir)
+	if err != nil {
+		t.Fatalf("discoverFiles: %v", err)
+	}
+	// A broken symlink must not be dropped as if it were a deleted file.
+	if len(files) != 1 || filepath.Base(files[0]) != "broken" {
+		t.Fatalf("expected [broken], got %v", files)
+	}
+}
+
 func TestCompileExcludes(t *testing.T) {
 	t.Parallel()
 	res, err := compileExcludes([]string{`vendor`, `\.pb\.go$`})
