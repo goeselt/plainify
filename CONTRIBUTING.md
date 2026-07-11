@@ -6,7 +6,7 @@
 | ------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `main.go`                       | CLI entry point: flag parsing, file discovery via `git ls-files`, JSON output.                       |
 | `internal/plainify/plainify.go` | Core scanner: encoding detection, CRLF, typographic character and invisible character normalisation. |
-| `internal/plainify/emoji.go`    | Emoji detection and GitHub shortcode replacement for `.md` files.                                    |
+| `internal/plainify/emoji.go`    | Emoji classification (Unicode ranges) that lets Markdown-like files keep emoji.                      |
 
 `internal/plainify` has no external dependencies. The only subprocess call is in `main.go` via
 `exec.Command("git", "ls-files", ...)` for automatic file discovery; all file I/O is handled directly by

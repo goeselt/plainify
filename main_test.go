@@ -33,6 +33,35 @@ func TestDiscoverFiles(t *testing.T) {
 	}
 }
 
+func TestDiscoverFiles_SkipsDeletedTracked(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	run(t, dir, "git", "init")
+	run(t, dir, "git", "config", "user.email", "test@test.local")
+	run(t, dir, "git", "config", "user.name", "Test")
+	writeTestFile(t, filepath.Join(dir, "hello.txt"), "hello\n")
+	writeTestFile(t, filepath.Join(dir, "gone.txt"), "bye\n")
+	run(t, dir, "git", "add", "hello.txt", "gone.txt")
+	run(t, dir, "git", "commit", "-m", "init")
+
+	// Delete a tracked file from the working tree without staging the deletion.
+	if err := os.Remove(filepath.Join(dir, "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := discoverFiles(dir)
+	if err != nil {
+		t.Fatalf("discoverFiles: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d: %v", len(files), files)
+	}
+	if filepath.Base(files[0]) != "hello.txt" {
+		t.Errorf("expected hello.txt, got %v", files[0])
+	}
+}
+
 func TestCompileExcludes(t *testing.T) {
 	t.Parallel()
 	res, err := compileExcludes([]string{`vendor`, `\.pb\.go$`})
@@ -223,7 +252,8 @@ func run(t *testing.T, dir string, name string, args ...string) {
 
 func testProjectRoot(t *testing.T) string {
 	t.Helper()
-	// Walk up from the test file to find go.mod.
+	// go test runs with the package directory as the working directory;
+	// for package main that is the module root.
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
