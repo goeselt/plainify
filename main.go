@@ -1,5 +1,6 @@
-// plainify detects and fixes encoding issues, CRLF line endings, non-ASCII
-// typographic characters, and emoji in text files.
+// plainify detects and fixes encoding issues, CRLF line endings, and
+// non-ASCII typographic, invisible, and control characters in text files.
+// Emoji are tolerated in Markdown-like files and reported everywhere else.
 //
 // Usage:
 //
@@ -11,7 +12,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -62,7 +65,7 @@ func main() {
 	}
 
 	if len(files) == 0 {
-		files, err = discoverFiles(absWS)
+		files, err = discoverFiles(context.Background(), absWS)
 		if err != nil {
 			fatal("file discovery: %v", err)
 		}
@@ -143,6 +146,7 @@ func main() {
 }
 
 // resolveWorkspaceAndFiles separates the workspace directory from explicit file paths.
+// Only one directory argument is supported; further directories are ignored with a warning.
 func resolveWorkspaceAndFiles(wsFlag string, args []string) (ws string, files []string) {
 	ws = wsFlag
 	for _, a := range args {
@@ -150,6 +154,8 @@ func resolveWorkspaceAndFiles(wsFlag string, args []string) (ws string, files []
 		if err == nil && fi.IsDir() {
 			if ws == "" {
 				ws = a
+			} else {
+				fmt.Fprintf(os.Stderr, "[plainify] warning: ignoring extra directory argument %q (workspace is %q)\n", a, ws)
 			}
 		} else {
 			files = append(files, a)
@@ -166,8 +172,8 @@ func resolveWorkspaceAndFiles(wsFlag string, args []string) (ws string, files []
 }
 
 // discoverFiles runs git ls-files to find tracked and untracked (non-ignored) files.
-func discoverFiles(workspace string) ([]string, error) {
-	cmd := exec.Command("git", "ls-files", "--cached", "--others", "--exclude-standard")
+func discoverFiles(ctx context.Context, workspace string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "--cached", "--others", "--exclude-standard")
 	cmd.Dir = workspace
 	out, err := cmd.Output()
 	if err != nil {
@@ -180,7 +186,15 @@ func discoverFiles(workspace string) ([]string, error) {
 			continue
 		}
 		seen[line] = true
-		files = append(files, filepath.Join(workspace, filepath.FromSlash(line)))
+		path := filepath.Join(workspace, filepath.FromSlash(line))
+		// git ls-files --cached also lists tracked files that were deleted
+		// from the working tree; skip them instead of failing the scan.
+		// Lstat, not Stat: a broken symlink still exists as a link and must
+		// reach ScanFile to be reported, not be mistaken for a deleted file.
+		if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		files = append(files, path)
 	}
 	return files, nil
 }

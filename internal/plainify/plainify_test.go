@@ -3,6 +3,7 @@ package plainify_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/goeselt/plainify/internal/plainify"
@@ -84,8 +85,10 @@ func TestScanFile_UTF8BOM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(findings) == 0 {
-		t.Fatal("expected UTF-8 BOM finding, got none")
+	// Exactly one finding: the BOM must not additionally be reported as a
+	// non-ASCII or zero-width U+FEFF character.
+	if len(findings) != 1 {
+		t.Fatalf("expected exactly the BOM finding, got %d: %v", len(findings), findings)
 	}
 	// AllowUtf8Bom suppresses the finding.
 	findings, err = plainify.ScanFile(path, "file.txt", plainify.Config{AllowUtf8Bom: true})
@@ -121,49 +124,141 @@ func TestScanFile_SkipExtension(t *testing.T) {
 	}
 }
 
-func TestScanFile_EmojiInMarkdown(t *testing.T) {
+func TestScanFile_EmojiAllowedInMarkdown(t *testing.T) {
 	t.Parallel()
 	path := writeFile(t, "README.md", "# Hello \U0001F680 World\n")
 	findings, err := plainify.ScanFile(path, "README.md", plainify.Config{Fix: false})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(findings) == 0 {
-		t.Fatal("expected emoji finding in markdown, got none")
-	}
-	if findings[0].Message != "emoji - use :rocket:" {
-		t.Errorf("unexpected message: %q", findings[0].Message)
+	if len(findings) != 0 {
+		t.Errorf("expected emoji to be allowed in markdown, got: %v", findings)
 	}
 }
 
-func TestScanFile_EmojiInMarkdownFix(t *testing.T) {
+func TestScanFile_EmojiPreservedInMarkdownFix(t *testing.T) {
 	t.Parallel()
-	path := writeFile(t, "README.md", "Deploy \U0001F680 now\n")
+	content := "Deploy \U0001F680 now\n"
+	path := writeFile(t, "README.md", content)
 	findings, err := plainify.ScanFile(path, "README.md", plainify.Config{Fix: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(findings) != 0 {
-		t.Errorf("expected no findings after fix, got: %v", findings)
+		t.Errorf("expected no findings, got: %v", findings)
 	}
 	got, _ := os.ReadFile(path)
-	if string(got) != "Deploy :rocket: now\n" {
-		t.Errorf("emoji not replaced: %q", got)
+	if string(got) != content {
+		t.Errorf("emoji must not be rewritten: %q", got)
 	}
 }
 
-func TestScanFile_EmojiNotInNonMarkdown(t *testing.T) {
+func TestScanFile_EmojiSequencesAllowedInMarkdown(t *testing.T) {
 	t.Parallel()
-	// Emoji in a .txt file should be reported as non-ASCII, not as emoji shortcode.
+	// Variation selector (red heart), ZWJ sequence (family), keycap, flag.
+	content := "\u2764\uFE0F \U0001F468\u200D\U0001F469\u200D\U0001F467 1\uFE0F\u20E3 \U0001F1E9\U0001F1EA\n"
+	path := writeFile(t, "doc.md", content)
+	findings, err := plainify.ScanFile(path, "doc.md", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected emoji sequences to be allowed, got: %v", findings)
+	}
+	// Fix mode must leave the sequences intact, including the ZWJs.
+	findings, err = plainify.ScanFile(path, "doc.md", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings in fix mode, got: %v", findings)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != content {
+		t.Errorf("emoji sequences must not be modified: %q", got)
+	}
+}
+
+func TestScanFile_EmojiAllowedInAgentRuleFiles(t *testing.T) {
+	t.Parallel()
+	// Markdown-like agent instruction files (e.g. Cursor .mdc rules).
+	path := writeFile(t, "rules.mdc", "Use \u2705 for pass and \u274C for fail\n")
+	findings, err := plainify.ScanFile(path, "rules.mdc", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected emoji to be allowed in .mdc, got: %v", findings)
+	}
+}
+
+func TestScanFile_EmojiReportedOutsideMarkdown(t *testing.T) {
+	t.Parallel()
+	// Emoji outside Markdown-like files are non-ASCII findings and are not fixed.
 	path := writeFile(t, "notes.txt", "Launch \U0001F680\n")
 	findings, err := plainify.ScanFile(path, "notes.txt", plainify.Config{Fix: false})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, f := range findings {
-		if f.Message == "emoji \u2014 use :rocket:" {
-			t.Errorf("expected non-ASCII finding, not emoji shortcode suggestion")
-		}
+	if len(findings) != 1 {
+		t.Fatalf("expected exactly one finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "non-ASCII character U+1F680 (emoji)" {
+		t.Errorf("unexpected message: %q", findings[0].Message)
+	}
+
+	findings, err = plainify.ScanFile(path, "notes.txt", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Errorf("expected emoji to remain a finding in fix mode, got: %v", findings)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "Launch \U0001F680\n" {
+		t.Errorf("emoji must not be rewritten: %q", got)
+	}
+}
+
+func TestScanFile_ZWJOutsideEmojiRemovedInMarkdown(t *testing.T) {
+	t.Parallel()
+	// A zero-width joiner between letters is not an emoji sequence and must
+	// still be flagged and removed, even in Markdown-like files.
+	path := writeFile(t, "doc.md", "hel\u200Dlo\n")
+	findings, err := plainify.ScanFile(path, "doc.md", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one zero-width finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "zero-width character U+200D (zero-width joiner) - remove" {
+		t.Errorf("unexpected message: %q", findings[0].Message)
+	}
+
+	if _, err := plainify.ScanFile(path, "doc.md", plainify.Config{Fix: true}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "hello\n" {
+		t.Errorf("ZWJ outside emoji not removed: %q", got)
+	}
+}
+
+func TestScanFile_StrayVariationSelectorFlaggedInMarkdown(t *testing.T) {
+	t.Parallel()
+	// A variation selector without a preceding emoji base is suspicious and
+	// must remain a finding even in Markdown-like files.
+	path := writeFile(t, "doc.md", "weird a\uFE0F here\n")
+	findings, err := plainify.ScanFile(path, "doc.md", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "non-ASCII character U+FE0F" {
+		t.Errorf("unexpected message: %q", findings[0].Message)
 	}
 }
 
@@ -263,24 +358,6 @@ func TestScanFile_NoDoubleReport(t *testing.T) {
 	// Exactly one finding expected -- the typographic char report only.
 	if len(findings) != 1 {
 		t.Errorf("expected 1 finding (no double-report), got %d: %v", len(findings), findings)
-	}
-}
-
-func TestReplaceEmoji(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		in, want string
-	}{
-		{"hello", "hello"},
-		{"\U0001F680", ":rocket:"},
-		{"fix \U0001F41B and \u2728", "fix :bug: and :sparkles:"},
-		{"\u2764\uFE0F you", ":heart: you"},
-	}
-	for _, tc := range cases {
-		got := plainify.ReplaceEmoji(tc.in)
-		if got != tc.want {
-			t.Errorf("ReplaceEmoji(%q) = %q, want %q", tc.in, got, tc.want)
-		}
 	}
 }
 
@@ -437,6 +514,42 @@ func TestScanFile_PureCRLF(t *testing.T) {
 	}
 }
 
+func TestScanFile_ColumnsCountRunes(t *testing.T) {
+	t.Parallel()
+	// An accented character (2 bytes in UTF-8) precedes the em-dash: the
+	// reported column must be the rune position, not the byte offset.
+	path := writeFile(t, "file.txt", "a\u00E9b\u2014x\n")
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) == 0 {
+		t.Fatal("expected findings, got none")
+	}
+	if findings[0].Col != 4 {
+		t.Errorf("em-dash column = %d, want 4 (rune-based)", findings[0].Col)
+	}
+}
+
+func TestScanFile_NullByteAfterHeaderIsBinary(t *testing.T) {
+	t.Parallel()
+	// A null byte beyond the 8 KB header must still mark the file as binary;
+	// it must not be deleted as a stray control character in fix mode.
+	content := strings.Repeat("a", 9000) + "\x00b\r\n"
+	path := writeFile(t, "file.txt", content)
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected binary to be skipped, got findings: %v", findings)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != content {
+		t.Error("binary file must not be rewritten")
+	}
+}
+
 func TestScanFile_BELControlFix(t *testing.T) {
 	t.Parallel()
 	// BEL character (0x07) -- sometimes left in from terminal escape sequences.
@@ -451,5 +564,367 @@ func TestScanFile_BELControlFix(t *testing.T) {
 	got, _ := os.ReadFile(path)
 	if string(got) != "alertdone\n" {
 		t.Errorf("BEL not removed: %q", got)
+	}
+}
+
+func TestScanFile_WordJoinerDetectAndFix(t *testing.T) {
+	t.Parallel()
+	path := writeFile(t, "file.txt", "a\u2060b\n")
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "zero-width character U+2060 (word joiner) - remove" {
+		t.Errorf("unexpected message: %q", findings[0].Message)
+	}
+
+	if _, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: true}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "ab\n" {
+		t.Errorf("word joiner not removed: %q", got)
+	}
+}
+
+func TestScanFile_TagCharactersRemoved(t *testing.T) {
+	t.Parallel()
+	// Unicode tag characters (U+E0000-U+E007F) are a data-smuggling channel.
+	path := writeFile(t, "file.txt", "hi\U000E0041there\n")
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "zero-width character U+E0041 (Unicode tag character) - remove" {
+		t.Errorf("unexpected message: %q", findings[0].Message)
+	}
+
+	if _, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: true}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "hithere\n" {
+		t.Errorf("tag character not removed: %q", got)
+	}
+}
+
+func TestScanFile_VariationSelectorRemoved(t *testing.T) {
+	t.Parallel()
+	// VS1-VS14 outside emoji context can hide data in plain-looking text.
+	path := writeFile(t, "file.txt", "a\uFE01b\n")
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "zero-width character U+FE01 (variation selector) - remove" {
+		t.Errorf("unexpected message: %q", findings[0].Message)
+	}
+
+	if _, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: true}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "ab\n" {
+		t.Errorf("variation selector not removed: %q", got)
+	}
+}
+
+func TestScanFile_TextPresentationSelectorAllowedInMarkdown(t *testing.T) {
+	t.Parallel()
+	// VS15 (text presentation) after an emoji base is legitimate in Markdown.
+	path := writeFile(t, "doc.md", "skull \u2620\uFE0E here\n")
+	findings, err := plainify.ScanFile(path, "doc.md", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected text presentation sequence to be allowed, got: %v", findings)
+	}
+}
+
+func TestScanFile_QuotesAndDashesFixed(t *testing.T) {
+	t.Parallel()
+	// Guillemets, German low quotes, prime, minus sign, non-breaking hyphen.
+	path := writeFile(t, "file.txt", "\u00ABa\u00BB \u201Eb\u201C 5\u2032 3\u22122 x\u2011y\n")
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings after fix, got: %v", findings)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "\"a\" \"b\" 5' 3-2 x-y\n" {
+		t.Errorf("typographic characters not fixed: %q", got)
+	}
+}
+
+func TestScanFile_UnicodeSpacesFixed(t *testing.T) {
+	t.Parallel()
+	// Narrow no-break space, em space, ideographic space.
+	path := writeFile(t, "file.txt", "a\u202Fb\u2003c\u3000d\n")
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings after fix, got: %v", findings)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "a b c d\n" {
+		t.Errorf("unicode spaces not fixed: %q", got)
+	}
+}
+
+func TestScanFile_FullwidthASCIIFixed(t *testing.T) {
+	t.Parallel()
+	path := writeFile(t, "file.txt", "\uFF28\uFF49\uFF01\n")
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings after fix, got: %v", findings)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "Hi!\n" {
+		t.Errorf("fullwidth ASCII not fixed: %q", got)
+	}
+}
+
+func TestScanFile_LineSeparatorFixed(t *testing.T) {
+	t.Parallel()
+	// U+2028 breaks JavaScript string literals and is invisible in editors.
+	path := writeFile(t, "file.txt", "a\u2028b\n")
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings after fix, got: %v", findings)
+	}
+	got, _ := os.ReadFile(path)
+	if string(got) != "a\nb\n" {
+		t.Errorf("line separator not converted: %q", got)
+	}
+}
+
+func TestScanFile_MojibakeDetected(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, content, wantSeq string
+	}{
+		{"cp1252-apostrophe", "don\u00E2\u20AC\u2122t stop\n", "\u00E2\u20AC"},
+		{"latin1-umlaut", "M\u00C3\u00BCller\n", "\u00C3\u00BC"},
+		{"latin1-nbsp", "price\u00C2\u00A0100\n", "\u00C2\\u00a0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeFile(t, "file.txt", tc.content)
+			findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: false})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(findings) != 1 {
+				t.Fatalf("expected one mojibake finding, got %d: %v", len(findings), findings)
+			}
+			want := "possible mojibake \"" + tc.wantSeq + "\" (UTF-8 read as Latin-1/CP1252) - re-encode the file"
+			if findings[0].Message != want {
+				t.Errorf("message = %q, want %q", findings[0].Message, want)
+			}
+
+			// Fix mode must not rewrite the file: character-level fixes would
+			// destroy the ability to repair it by re-encoding.
+			if _, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: true}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			got, _ := os.ReadFile(path)
+			if string(got) != tc.content {
+				t.Errorf("mojibake file must not be rewritten: %q", got)
+			}
+		})
+	}
+}
+
+func TestScanFile_MojibakeNoFalsePositive(t *testing.T) {
+	t.Parallel()
+	// Legitimate accented words: the lead characters are followed by ASCII.
+	path := writeFile(t, "file.txt", "S\u00C3O PAULO bl\u00E2me\n")
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, f := range findings {
+		if strings.HasPrefix(f.Message, "possible mojibake") {
+			t.Errorf("false positive mojibake finding: %q", f.Message)
+		}
+	}
+}
+
+func TestScanFile_CombiningMarkNFDHint(t *testing.T) {
+	t.Parallel()
+	// Decomposed u-umlaut (u + combining diaeresis), e.g. from macOS file APIs.
+	path := writeFile(t, "file.txt", "u\u0308ber\n")
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %v", len(findings), findings)
+	}
+	want := "combining mark U+0308 (decomposed character) - normalize to NFC"
+	if findings[0].Message != want {
+		t.Errorf("message = %q, want %q", findings[0].Message, want)
+	}
+}
+
+func TestScanFile_BrokenSymlink(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(filepath.Join(dir, "nonexistent-target"), link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	findings, err := plainify.ScanFile(link, "link", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one broken-symlink finding, got %d: %v", len(findings), findings)
+	}
+	if !strings.HasPrefix(findings[0].Message, "broken symlink -> ") {
+		t.Errorf("unexpected message: %q", findings[0].Message)
+	}
+}
+
+func TestScanFile_ValidSymlinkNotFollowed(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// Target contains issues (CRLF); the symlink must not surface them and
+	// must not be rewritten in fix mode.
+	target := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(target, []byte("line1\r\nline2\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	findings, err := plainify.ScanFile(link, "link.txt", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected valid symlink to be skipped, got: %v", findings)
+	}
+	// The target must be untouched (fix must not follow the link).
+	got, _ := os.ReadFile(target)
+	if string(got) != "line1\r\nline2\r\n" {
+		t.Errorf("symlink target must not be rewritten: %q", got)
+	}
+}
+
+func TestScanFile_DirectorySkipped(t *testing.T) {
+	t.Parallel()
+	// A submodule gitlink is listed by git ls-files as a directory path.
+	dir := t.TempDir()
+	findings, err := plainify.ScanFile(dir, "mysub", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected directory to be skipped, got: %v", findings)
+	}
+}
+
+func TestScanFile_LFSPointerDetected(t *testing.T) {
+	t.Parallel()
+	// LFS pointer with a binary extension: detection must precede skipExts.
+	pointer := "version https://git-lfs.github.com/spec/v1\n" +
+		"oid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\n" +
+		"size 12345\n"
+	path := writeFile(t, "asset.png", pointer)
+	findings, err := plainify.ScanFile(path, "asset.png", plainify.Config{Fix: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one LFS finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "Git LFS pointer (object not checked out) - run git lfs pull" {
+		t.Errorf("unexpected message: %q", findings[0].Message)
+	}
+	// Must not be rewritten.
+	got, _ := os.ReadFile(path)
+	if string(got) != pointer {
+		t.Errorf("LFS pointer must not be rewritten: %q", got)
+	}
+}
+
+func TestScanFile_ConflictMarkersDetected(t *testing.T) {
+	t.Parallel()
+	content := "line\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> feature\ntail\n"
+	path := writeFile(t, "file.txt", content)
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 3 {
+		t.Fatalf("expected three conflict-marker findings, got %d: %v", len(findings), findings)
+	}
+	for _, f := range findings {
+		if f.Message != "merge conflict marker - resolve the conflict" {
+			t.Errorf("unexpected message: %q", f.Message)
+		}
+	}
+	if findings[0].Line != 2 || findings[1].Line != 4 || findings[2].Line != 6 {
+		t.Errorf("unexpected lines: %v", findings)
+	}
+}
+
+func TestScanFile_SetextHeadingNotConflict(t *testing.T) {
+	t.Parallel()
+	// A setext H1 underline (=======) with no angle markers is not a conflict.
+	path := writeFile(t, "doc.md", "Title\n=======\n\nbody\n")
+	findings, err := plainify.ScanFile(path, "doc.md", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, f := range findings {
+		if strings.HasPrefix(f.Message, "merge conflict marker") {
+			t.Errorf("false positive conflict marker on setext heading: %v", f)
+		}
+	}
+}
+
+func TestScanFile_DecorativeSeparatorNotConflict(t *testing.T) {
+	t.Parallel()
+	// Longer runs than 7 chars must never be treated as conflict markers,
+	// even alongside real angle markers elsewhere.
+	content := "<<<<<<< HEAD\nx\n========\ny\n>>>>>>> branch\n"
+	path := writeFile(t, "file.txt", content)
+	findings, err := plainify.ScanFile(path, "file.txt", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Only the two angle markers count; the 8-char "========" does not.
+	count := 0
+	for _, f := range findings {
+		if strings.HasPrefix(f.Message, "merge conflict marker") {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Errorf("expected 2 conflict markers (8-char separator excluded), got %d: %v", count, findings)
 	}
 }
