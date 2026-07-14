@@ -124,49 +124,57 @@ func TestScanFile_SkipExtension(t *testing.T) {
 	}
 }
 
-func TestScanFile_EmojiAllowedInMarkdown(t *testing.T) {
+func TestScanFile_EmojiAllowedInEveryFileType(t *testing.T) {
 	t.Parallel()
-	path := writeFile(t, "README.md", "# Hello \U0001F680 World\n")
-	findings, err := plainify.ScanFile(path, "README.md", plainify.Config{Fix: false})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// Emoji are deliberate, visible content: never reported, never rewritten,
+	// regardless of file type. Workflow step names, shell and Go output
+	// strings, and documentation all use them legitimately.
+	cases := []struct{ name, content string }{
+		{"README.md", "# Hello \U0001F680 World\n"},
+		{"rules.mdc", "Use \u2705 for pass and \u274C for fail\n"},
+		{"ci.yml", "- name: Build \U0001F680\n  run: echo \"\u2705 done\"\n"},
+		{"main.go", "func main() { println(\"\u2705 done\") }\n"},
+		{"deploy.sh", "echo \"\U0001F680 deploying\"\n"},
+		{"notes.txt", "Launch \U0001F680\n"},
 	}
-	if len(findings) != 0 {
-		t.Errorf("expected emoji to be allowed in markdown, got: %v", findings)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeFile(t, tc.name, tc.content)
+			findings, err := plainify.ScanFile(path, tc.name, plainify.Config{Fix: false})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(findings) != 0 {
+				t.Errorf("expected emoji to be allowed, got: %v", findings)
+			}
+			// Fix mode must leave the file byte-identical.
+			if _, err := plainify.ScanFile(path, tc.name, plainify.Config{Fix: true}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			got, _ := os.ReadFile(path)
+			if string(got) != tc.content {
+				t.Errorf("emoji must not be rewritten: %q", got)
+			}
+		})
 	}
 }
 
-func TestScanFile_EmojiPreservedInMarkdownFix(t *testing.T) {
-	t.Parallel()
-	content := "Deploy \U0001F680 now\n"
-	path := writeFile(t, "README.md", content)
-	findings, err := plainify.ScanFile(path, "README.md", plainify.Config{Fix: true})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(findings) != 0 {
-		t.Errorf("expected no findings, got: %v", findings)
-	}
-	got, _ := os.ReadFile(path)
-	if string(got) != content {
-		t.Errorf("emoji must not be rewritten: %q", got)
-	}
-}
-
-func TestScanFile_EmojiSequencesAllowedInMarkdown(t *testing.T) {
+func TestScanFile_EmojiSequencesPreserved(t *testing.T) {
 	t.Parallel()
 	// Variation selector (red heart), ZWJ sequence (family), keycap, flag.
+	// The invisible glue (U+200D, U+FE0F, U+20E3) must survive fix mode in a
+	// non-Markdown file too, or a family emoji would be split into its parts.
 	content := "\u2764\uFE0F \U0001F468\u200D\U0001F469\u200D\U0001F467 1\uFE0F\u20E3 \U0001F1E9\U0001F1EA\n"
-	path := writeFile(t, "doc.md", content)
-	findings, err := plainify.ScanFile(path, "doc.md", plainify.Config{Fix: false})
+	path := writeFile(t, "ci.yml", content)
+	findings, err := plainify.ScanFile(path, "ci.yml", plainify.Config{Fix: false})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(findings) != 0 {
 		t.Errorf("expected emoji sequences to be allowed, got: %v", findings)
 	}
-	// Fix mode must leave the sequences intact, including the ZWJs.
-	findings, err = plainify.ScanFile(path, "doc.md", plainify.Config{Fix: true})
+	findings, err = plainify.ScanFile(path, "ci.yml", plainify.Config{Fix: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -179,51 +187,10 @@ func TestScanFile_EmojiSequencesAllowedInMarkdown(t *testing.T) {
 	}
 }
 
-func TestScanFile_EmojiAllowedInAgentRuleFiles(t *testing.T) {
+func TestScanFile_ZWJOutsideEmojiStillRemoved(t *testing.T) {
 	t.Parallel()
-	// Markdown-like agent instruction files (e.g. Cursor .mdc rules).
-	path := writeFile(t, "rules.mdc", "Use \u2705 for pass and \u274C for fail\n")
-	findings, err := plainify.ScanFile(path, "rules.mdc", plainify.Config{Fix: false})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(findings) != 0 {
-		t.Errorf("expected emoji to be allowed in .mdc, got: %v", findings)
-	}
-}
-
-func TestScanFile_EmojiReportedOutsideMarkdown(t *testing.T) {
-	t.Parallel()
-	// Emoji outside Markdown-like files are non-ASCII findings and are not fixed.
-	path := writeFile(t, "notes.txt", "Launch \U0001F680\n")
-	findings, err := plainify.ScanFile(path, "notes.txt", plainify.Config{Fix: false})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(findings) != 1 {
-		t.Fatalf("expected exactly one finding, got %d: %v", len(findings), findings)
-	}
-	if findings[0].Message != "non-ASCII character U+1F680 (emoji)" {
-		t.Errorf("unexpected message: %q", findings[0].Message)
-	}
-
-	findings, err = plainify.ScanFile(path, "notes.txt", plainify.Config{Fix: true})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(findings) != 1 {
-		t.Errorf("expected emoji to remain a finding in fix mode, got: %v", findings)
-	}
-	got, _ := os.ReadFile(path)
-	if string(got) != "Launch \U0001F680\n" {
-		t.Errorf("emoji must not be rewritten: %q", got)
-	}
-}
-
-func TestScanFile_ZWJOutsideEmojiRemovedInMarkdown(t *testing.T) {
-	t.Parallel()
-	// A zero-width joiner between letters is not an emoji sequence and must
-	// still be flagged and removed, even in Markdown-like files.
+	// A zero-width joiner between letters is not an emoji sequence: allowing
+	// emoji everywhere must not weaken the invisible-character check.
 	path := writeFile(t, "doc.md", "hel\u200Dlo\n")
 	findings, err := plainify.ScanFile(path, "doc.md", plainify.Config{Fix: false})
 	if err != nil {
@@ -245,10 +212,10 @@ func TestScanFile_ZWJOutsideEmojiRemovedInMarkdown(t *testing.T) {
 	}
 }
 
-func TestScanFile_StrayVariationSelectorFlaggedInMarkdown(t *testing.T) {
+func TestScanFile_StrayVariationSelectorStillFlagged(t *testing.T) {
 	t.Parallel()
-	// A variation selector without a preceding emoji base is suspicious and
-	// must remain a finding even in Markdown-like files.
+	// A variation selector without a preceding emoji base is not emoji glue
+	// and remains a finding.
 	path := writeFile(t, "doc.md", "weird a\uFE0F here\n")
 	findings, err := plainify.ScanFile(path, "doc.md", plainify.Config{Fix: false})
 	if err != nil {
@@ -258,6 +225,23 @@ func TestScanFile_StrayVariationSelectorFlaggedInMarkdown(t *testing.T) {
 		t.Fatalf("expected one finding, got %d: %v", len(findings), findings)
 	}
 	if findings[0].Message != "non-ASCII character U+FE0F" {
+		t.Errorf("unexpected message: %q", findings[0].Message)
+	}
+}
+
+func TestScanFile_NonASCIILetterStillReported(t *testing.T) {
+	t.Parallel()
+	// Accented letters can arrive by accident (encoding mishap, bad paste), so
+	// unlike emoji they remain a backstop finding outside typographic fixes.
+	path := writeFile(t, "main.go", "s := \"Gr\u00FC\u00DFe\"\n")
+	findings, err := plainify.ScanFile(path, "main.go", plainify.Config{Fix: false})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d: %v", len(findings), findings)
+	}
+	if findings[0].Message != "non-ASCII character U+00FC" {
 		t.Errorf("unexpected message: %q", findings[0].Message)
 	}
 }

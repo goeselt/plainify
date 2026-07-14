@@ -5,15 +5,15 @@ characters you cannot see in an editor.
 
 Text files accumulate cruft that looks fine but is not: smart quotes and em-dashes from AI output or word-processor
 paste, `\r\n` from cross-platform edits, zero-width and bidirectional characters that are invisible on screen but change
-what compilers and regexes see, emoji in source files, and mojibake from a bad re-encoding. `plainify` rewrites what it
-can safely fix in place and reports the rest, so diffs stay clean and "why does this regular expression not match?"
-mysteries go away.
+what compilers and regular expressions see, and mojibake from a bad re-encoding. `plainify` rewrites what it can safely
+fix in place and reports the rest, so diffs stay clean and "why does this regular expression not match?" mysteries go
+away.
 
 - **Fixes in place, or previews.** A plain run rewrites every fixable issue; `--nofix` reports without touching a byte.
 - **Catches invisible attacks.** Bidirectional controls (the [Trojan Source](https://trojansource.codes) vector,
   CVE-2021-42574), zero-width characters, and Unicode tag characters -- invisible in editors, dangerous in code and in
   agent instruction files.
-- **Knows where emoji belong.** Left intact in Markdown and agent-instruction files, flagged in source code.
+- **Leaves emoji alone.** They are visible and deliberate, not accidental cruft -- never flagged, never rewritten.
 - **Machine- and human-readable.** Human-readable progress on stderr, structured JSON on stdout for CI gating.
 - **Zero config, git-aware.** Discovers files through `git ls-files` -- no config file, no external dependencies.
 
@@ -71,11 +71,14 @@ $ plainify
 
 **Reported, never modified:**
 
-- **Emoji** outside Markdown-like files.
 - **Encoding problems** -- UTF-16, invalid UTF-8, mojibake, and NFD (decomposed) characters.
 - **Merge conflict markers** left in a file after an unresolved merge.
 - **Git LFS pointers** whose object was never checked out.
 - **Broken symlinks** (valid symlinks are skipped and never followed).
+- **Remaining non-ASCII** -- anything left over that a human should look at.
+
+**Never touched:** emoji, in any file type. They are visible and deliberately authored, so flagging them would report an
+intentional choice as a defect.
 
 See [docs/checks.md](docs/checks.md) for the exact character set and the behavior of every check. Binary files, known
 binary extensions, and submodule gitlinks are silently skipped.

@@ -1,26 +1,22 @@
 package plainify
 
-// Emoji policy: emoji are legitimate content in Markdown-like files
-// (documentation and agent instruction files) and are tolerated there.
-// In every other file they surface as non-ASCII findings. Emoji are never
-// rewritten.
-
-// emojiAllowedExts lists extensions of Markdown-like files in which emoji are
-// allowed, including agent instruction formats such as Cursor rules (.mdc).
-var emojiAllowedExts = map[string]bool{
-	".md":       true,
-	".markdown": true,
-	".mdx":      true,
-	".mdc":      true,
-	".adoc":     true,
-	".asciidoc": true,
-	".rst":      true,
-}
+// Emoji policy: emoji are never reported and never rewritten, in any file type.
+// Unlike every other character class plainify handles, emoji are visible and
+// deliberately authored -- they do not arrive by accident from a paste or a
+// word processor -- so flagging them would report an intentional choice as a
+// defect. Documentation, workflow files, and user-facing output strings all use
+// them legitimately.
+//
+// The classification below exists for one reason: the glue characters that hold
+// an emoji sequence together (zero-width joiner, variation selector, combining
+// keycap) are also invisible characters that plainify deletes. Recognizing them
+// in emoji context keeps fix mode from mangling a sequence such as a family
+// emoji into its individual parts.
 
 // isEmojiBase reports whether r is an emoji base character. The ranges follow
 // the Unicode emoji blocks (UTS #51, https://unicode.org/reports/tr51/) at
-// block granularity: slight over-matching only widens what Markdown-like
-// files tolerate; detection in all other files is unaffected.
+// block granularity: slight over-matching only widens which invisible glue
+// characters are preserved, and never suppresses a finding on its own.
 func isEmojiBase(r rune) bool {
 	switch {
 	case r >= 0x1F000 && r <= 0x1FAFF:

@@ -57,11 +57,6 @@ Removed by default. `--allow-utf8-bom` keeps the BOM while still fixing everythi
 
 ## Reported, Never Modified
 
-### Emoji
-
-Emoji are legitimate content in Markdown-like files (`.md`, `.markdown`, `.mdx`, `.mdc`, `.adoc`, `.asciidoc`, `.rst`)
-and are left untouched there. In every other file they are reported as non-ASCII findings. Emoji are never rewritten.
-
 ### Encoding Problems
 
 - UTF-16 LE/BE, with or without a BOM (`convert to UTF-8`).
@@ -82,6 +77,22 @@ None of these is a character-level fix, so all are report-only:
   `version https://git-lfs.github.com/spec/`) because the real object was never checked out; run `git lfs pull`.
 - **Broken symlinks** -- a symlink whose target does not exist. Valid symlinks are skipped and never followed, so fix
   mode can never rewrite a target outside the workspace.
+
+## Never Reported
+
+### Emoji
+
+Emoji are never reported and never rewritten, in any file type. Every other character class `plainify` handles is
+invisible, accidental, or both: a smart quote arrives from a paste, a zero-width space from a bad copy. Emoji are the
+opposite -- visible on screen and deliberately authored. Flagging them would report an intentional choice as a defect,
+and documentation, workflow step names, and user-facing output strings all use them legitimately.
+
+The invisible glue that holds an emoji sequence together (zero-width joiner U+200D, variation selectors U+FE0E and
+U+FE0F, combining keycap U+20E3) is preserved when it sits inside an emoji sequence, so fix mode cannot split a family
+emoji into its individual parts. The same characters outside emoji context remain findings and are still removed.
+
+Other non-ASCII characters, such as accented letters, are still reported: unlike emoji they can arrive by accident from
+an encoding mishap or a bad paste, so surfacing them for a human decision stays useful.
 
 ## Skipped
 
