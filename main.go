@@ -1,6 +1,6 @@
 // plainify detects and fixes encoding issues, CRLF line endings, and
 // non-ASCII typographic, invisible, and control characters in text files.
-// Emoji are tolerated in Markdown-like files and reported everywhere else.
+// Emoji are deliberate content and are never reported or rewritten.
 //
 // Usage:
 //

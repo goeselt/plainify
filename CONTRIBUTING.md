@@ -6,7 +6,7 @@
 | ------------------------------- | ------------------------------------------------------------------------------------------------- |
 | `main.go`                       | CLI entry point: flag parsing, file discovery via `git ls-files`, JSON output.                    |
 | `internal/plainify/plainify.go` | Core scanner: encoding detection, CRLF, typographic/invisible normalisation, working-tree checks. |
-| `internal/plainify/emoji.go`    | Emoji classification (Unicode ranges) that lets Markdown-like files keep emoji.                   |
+| `internal/plainify/emoji.go`    | Emoji classification (Unicode ranges) that keeps emoji sequences intact when fixing.              |
 
 `internal/plainify` has no external dependencies, and the only subprocess call is `git ls-files` in `main.go` for file
 discovery; all file I/O runs directly through `plainify.ScanFile`. Keep both invariants when adding checks.
